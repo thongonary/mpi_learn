@@ -87,6 +87,7 @@ if __name__ == '__main__':
     os.environ['KERAS_BACKEND'] = backend
 
     print(backend)
+    
     import_keras()
     import keras.callbacks as cbks
     import keras.backend as K
