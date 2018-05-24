@@ -7,9 +7,17 @@ Test with the MNIST dataset:
 ```
 git clone https://github.com/duanders/mpi_learn.git
 cd mpi_learn
+```
+Using Keras with Tensorflow backend:
+```
 python BuildModel.py mnist
 python models/get_mnist.py
-mpirun -np 3 ./MPIDriver.py mnist_arch.json train_mnist.list test_mnist.list --loss categorical_crossentropy --epochs 3
+mpirun -np 3 ./MPIDriver.py mnist_arch.json train_mnist.list test_mnist.list --loss categorical_crossentropy --epochs 3 --tf
+```
+Using Pytorch:
+```
+python3 BuildModel.py mnist_pytorch
+mpirun -np 3 --tag-output python3 MPIDriver.py mnist_pytorch_arch.torch train_mnist.list test_mnist.list --loss categorical_crossentropy --epochs 1 --torch
 ```
 
 ## Using MPIDriver.py to train your model

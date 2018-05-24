@@ -55,26 +55,25 @@ class Data(object):
         else:
             self.file_names = file_names
             
-    def generate_data(self):
+    def generate_data(self, load_tensor=False):
        """Yields batches of training data until none are left."""
        leftovers = None
        for cur_file_name in self.file_names:
-           cur_file_features, cur_file_labels = self.load_data(cur_file_name)
+           cur_file_features, cur_file_labels = self.load_data(cur_file_name) if not load_tensor else self.load_tensor(cur_file_name)
            # concatenate any leftover data from the previous file
            if leftovers is not None:
-               cur_file_features = self.concat_data( leftovers[0], cur_file_features )
-               cur_file_labels = self.concat_data( leftovers[1], cur_file_labels )
+               cur_file_features = self.concat_data( leftovers[0], cur_file_features ) if not load_tensor else self.concat_tensor(leftovers[0], cur_file_features)
+               cur_file_labels = self.concat_data( leftovers[1], cur_file_labels ) if not load_tensor else self.concat_tensor(leftovers[1], cur_file_labels)
                leftovers = None
            num_in_file = self.get_num_samples( cur_file_features )
-
            for cur_pos in range(0, num_in_file, self.batch_size):
                next_pos = cur_pos + self.batch_size 
                if next_pos <= num_in_file:
                    yield ( self.get_batch( cur_file_features, cur_pos, next_pos ),
-                           self.get_batch( cur_file_labels, cur_pos, next_pos ) )
+                           self.get_batch( cur_file_labels, cur_pos, next_pos  ) )
                else:
-                   leftovers = ( self.get_batch( cur_file_features, cur_pos, num_in_file ),
-                                 self.get_batch( cur_file_labels, cur_pos, num_in_file ) )
+                   leftovers = ( self.get_batch( cur_file_features, cur_pos, num_in_file),
+                                 self.get_batch( cur_file_labels, cur_pos, num_in_file) )
 
     def count_data(self):
         """Counts the number of data points across all files"""
@@ -87,10 +86,14 @@ class Data(object):
     def is_numpy_array(self, data):
         return isinstance( data, np.ndarray )
 
+    def is_tensor(self, data):
+        import torch
+        return torch.is_tensor(data)
+
     def get_batch(self, data, start_pos, end_pos):
         """Input: a numpy array or list of numpy arrays.
             Gets elements between start_pos and end_pos in each array"""
-        if self.is_numpy_array(data):
+        if self.is_numpy_array(data) or self.is_tensor(data):
             return data[start_pos:end_pos] 
         else:
             return [ arr[start_pos:end_pos] for arr in data ]
@@ -104,10 +107,17 @@ class Data(object):
         else:
             return [ self.concat_data( d1, d2 ) for d1,d2 in zip(data1,data2) ]
 
+    def concat_tensor(self, data1, data2):
+        "Similar to concat_data, but operate on pytorch tensors instead"
+        if self.is_tensor(data1):
+            return torch.cat((data1, data2))
+        else:
+            return [ self.concat_tensor(d1, d2) for d1, d2 in zip(data1, data2) ]
+
     def get_num_samples(self, data):
         """Input: dataset consisting of a numpy array or list of numpy arrays.
             Output: number of samples in the dataset"""
-        if self.is_numpy_array(data):
+        if self.is_numpy_array(data) or self.is_tensor(data):
             return len(data)
         else:
             return len(data[0])
@@ -143,6 +153,21 @@ class H5Data(Data):
         Y = self.load_hdf5_data( h5_file[self.labels_name] )
         h5_file.close()
         return X,Y 
+
+    def load_tensor(self, in_file_name):
+        """Load numpy arrays from H5 file, 
+        and then convert them to pytorch tensors, and then send to GPU"""
+        X, Y = self.load_data(in_file_name)
+        import torch
+        def convert_to_tensor(data):
+            if hasattr(data, 'keys'):
+                out = [torch.from_numpy(data[key]) for key in sorted(data.keys())]
+            else:
+                out = torch.from_numpy(data)
+            return out
+        X = convert_to_tensor(X)
+        Y = convert_to_tensor(Y)
+        return X,Y
 
     def load_hdf5_data(self, data):
         """Returns a numpy array or (possibly nested) list of numpy arrays 

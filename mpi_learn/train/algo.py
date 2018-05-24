@@ -101,7 +101,7 @@ class Algo(object):
         else:
             update = []
             for cur_w, new_w in zip( cur_weights, new_weights ):
-                #print ("compute_update",type(cur_w))
+                #print ("compute_update",type(cur_w), cur_w.shape)
                 if type(cur_w) == list:
                     ## polymorph case
                     update.append([])
@@ -129,7 +129,7 @@ class Algo(object):
                     new_w = cur_w - self.elastic_force * np.subtract( cur_w, other_w )
                     new_weights[-1].append( new_w )
             else:
-                new_w = cur_w - self.elastic_force * np.subtract( m_w, om_w )
+                new_w = m_w - self.elastic_force * np.subtract( m_w, om_w )
                 new_weights.append( new_w )
         return new_weights
 

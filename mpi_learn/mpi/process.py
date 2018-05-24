@@ -4,6 +4,7 @@ import os,sys
 import numpy as np
 import socket
 import time
+import copy
 
 from mpi4py import MPI
 
@@ -90,10 +91,10 @@ class MPIProcess(object):
         self.model = self.model_builder.build_model()
 
         if tell_me: print ("weight pre-compile",socket.gethostname(),self.rank)
-        self.weights = self.model.get_weights()
+        self.weights = copy.deepcopy(self.model.get_weights())  # Need deepcopy for pytorch
         self.compile_model()
         if tell_me: print ("getting weights",socket.gethostname(),self.rank)
-        self.weights = self.model.get_weights()
+        self.weights = copy.deepcopy(self.model.get_weights())  
         if tell_me: print ("formatting update")
         self.update = self.model.format_update()
         if tell_me: print ("done with model",socket.gethostname(),self.rank)
@@ -460,8 +461,8 @@ class MPIWorker(MPIProcess):
             self.callback.on_epoch_begin(epoch)
             epoch_metrics = np.zeros((1,))
             i_batch = 0
-            for i_batch, batch in enumerate(self.data.generate_data()):
-                #self.callbacks.on_batch_begin(i_batch)
+            for i_batch, batch in enumerate(self.data.generate_data(load_tensor=True)):
+                #print(batch[0], batch[1])
                 self.callback.on_batch_begin(i_batch)
                 train_metrics = self.train_on_batch(batch)
                 #batch_logs = self.get_logs(train_metrics)
@@ -699,7 +700,7 @@ class MPIMaster(MPIProcess):
         #val_metrics = [ 0.0 for i in range( len(self.model.metrics_names()) ) ]
         val_metrics = np.zeros((1,))
         i_batch = 0
-        for i_batch, batch in enumerate(self.data.generate_data()):
+        for i_batch, batch in enumerate(self.data.generate_data(load_tensor=True)):
             #new_val_metrics = self.model.test_on_batch(*batch)
             new_val_metrics = self.model.test_on_batch(x=batch[0], y =batch[1] )
             if val_metrics.shape != new_val_metrics.shape:

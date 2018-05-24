@@ -12,7 +12,7 @@ from time import time,sleep
 from mpi_learn.mpi.manager import MPIManager, get_device
 from mpi_learn.train.algo import Algo
 from mpi_learn.train.data import H5Data
-from mpi_learn.train.model import ModelFromJson, ModelFromJsonTF
+from mpi_learn.train.model import ModelFromJson, ModelFromJsonTF, ModelPytorch
 from mpi_learn.utils import import_keras
 
 if __name__ == '__main__':
@@ -20,10 +20,11 @@ if __name__ == '__main__':
     parser.add_argument('--verbose',help='display metrics for each training batch',action='store_true')
     parser.add_argument('--profile',help='profile theano code',action='store_true')
     parser.add_argument('--tf', help='use tensorflow backend', action='store_true')
+    parser.add_argument('--torch', help='use pytorch', action='store_true')
 
     # model arguments
-    parser.add_argument('model_json', help='JSON file containing model architecture')
-    parser.add_argument('--model_weights', help='Provide the h5 file with weights', default=None)
+    parser.add_argument('model_json', help='JSON/torch file containing model architecture')
+    parser.add_argument('--model_weights', help='Provide the h5/torch file with weights', default=None)
     parser.add_argument('--trial-name', help='descriptive name for trial', 
             default='train', dest='trial_name')
 
@@ -76,44 +77,49 @@ if __name__ == '__main__':
     device = get_device( comm, args.masters, gpu_limit=args.max_gpus,
                 gpu_for_master=args.master_gpu)
     hide_device = True
-    if args.tf: 
-        backend = 'tensorflow'
-        if hide_device:
-            os.environ['CUDA_VISIBLE_DEVICES'] = device[-1] if 'gpu' in device else ''
-            print ('set to device',os.environ['CUDA_VISIBLE_DEVICES'])
-    else:
-        backend = 'theano'
-        os.environ['THEANO_FLAGS'] = "profile=%s,device=%s,floatX=float32" % (args.profile,device.replace('gpu','cuda'))
-    os.environ['KERAS_BACKEND'] = backend
+    if args.torch:
+        print("Using pytorch")
+        model_builder = ModelPytorch(comm, args.model_json, model_class_path='models.Models.Net')
 
-    print(backend)
-    
-    import_keras()
-    import keras.callbacks as cbks
-    import keras.backend as K
-    if args.tf:
-        gpu_options=K.tf.GPUOptions(
-            per_process_gpu_memory_fraction=0.1, #was 0.0
-            allow_growth = True,
-            visible_device_list = device[-1] if 'gpu' in device else '')
-        if hide_device:
+    else: 
+        if args.tf: 
+            backend = 'tensorflow'
+            if hide_device:
+                os.environ['CUDA_VISIBLE_DEVICES'] = device[-1] if 'gpu' in device else ''
+                print ('set to device',os.environ['CUDA_VISIBLE_DEVICES'])
+        else:
+            backend = 'theano'
+            os.environ['THEANO_FLAGS'] = "profile=%s,device=%s,floatX=float32" % (args.profile,device.replace('gpu','cuda'))
+        os.environ['KERAS_BACKEND'] = backend
+
+        print("Using {} backend".format(backend))
+        
+        import_keras()
+        import keras.callbacks as cbks
+        import keras.backend as K
+        if args.tf:
             gpu_options=K.tf.GPUOptions(
-                            per_process_gpu_memory_fraction=0.0,
-                            allow_growth = True,)        
-        K.set_session( K.tf.Session( config=K.tf.ConfigProto(
-            allow_soft_placement=True, log_device_placement=False,
-            gpu_options=gpu_options
-            ) ) )
-    if args.tf:
-        model_builder = ModelFromJsonTF( comm, args.model_json, device_name=device , weights=args.model_weights)
-        print ("Process {0} using device {1}".format(comm.Get_rank(), model_builder.device))
-    else:
-        model_builder = ModelFromJson( comm, args.model_json ,weights=args.model_weights)
-        print ("Process {0} using device {1}".format(comm.Get_rank(),device))
-        os.environ['THEANO_FLAGS'] = "profile=%s,device=%s,floatX=float32" % (args.profile,device.replace('gpu','cuda'))
-        # GPU ops need to be executed synchronously in order for profiling to make sense
-        if args.profile:
-            os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+                per_process_gpu_memory_fraction=0.1, #was 0.0
+                allow_growth = True,
+                visible_device_list = device[-1] if 'gpu' in device else '')
+            if hide_device:
+                gpu_options=K.tf.GPUOptions(
+                                per_process_gpu_memory_fraction=0.0,
+                                allow_growth = True,)        
+            K.set_session( K.tf.Session( config=K.tf.ConfigProto(
+                allow_soft_placement=True, log_device_placement=False,
+                gpu_options=gpu_options
+                ) ) )
+        if args.tf:
+            model_builder = ModelFromJsonTF( comm, args.model_json, device_name=device , weights=args.model_weights)
+            print ("Process {0} using device {1}".format(comm.Get_rank(), model_builder.device))
+        else:
+            model_builder = ModelFromJson( comm, args.model_json ,weights=args.model_weights)
+            print ("Process {0} using device {1}".format(comm.Get_rank(),device))
+            os.environ['THEANO_FLAGS'] = "profile=%s,device=%s,floatX=float32" % (args.profile,device.replace('gpu','cuda'))
+            # GPU ops need to be executed synchronously in order for profiling to make sense
+            if args.profile:
+                os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
     data = H5Data( batch_size=args.batch, 
@@ -137,12 +143,13 @@ if __name__ == '__main__':
 
     # Most Keras callbacks are supported
     callbacks = []
-    callbacks.append( cbks.ModelCheckpoint( '_'.join([
-        model_name,args.trial_name,"mpi_learn_result.h5"]), 
-        monitor='val_loss', verbose=1 ) )
-    if args.early_stopping is not None:
-        callbacks.append( cbks.EarlyStopping( patience=args.early_stopping,
-            verbose=1 ) )
+    if not args.torch: # not supported for now
+        callbacks.append( cbks.ModelCheckpoint( '_'.join([
+            model_name,args.trial_name,"mpi_learn_result.h5"]), 
+            monitor='val_loss', verbose=1 ) )
+        if args.early_stopping is not None:
+            callbacks.append( cbks.EarlyStopping( patience=args.early_stopping,
+                verbose=1 ) )
 
     # Creating the MPIManager object causes all needed worker and master nodes to be created
     manager = MPIManager( comm=comm, data=data, algo=algo, model_builder=model_builder,
@@ -152,14 +159,13 @@ if __name__ == '__main__':
 
     # Process 0 launches the training procedure
     if comm.Get_rank() == 0:
-        print (algo)
+        print ("Using algo {}".format(algo))
 
         t_0 = time()
         histories = manager.process.train() 
         delta_t = time() - t_0
         manager.free_comms()
         print ("Training finished in {0:.3f} seconds".format(delta_t))
-
         # Make output dictionary
         out_dict = { "args":vars(args),
                      "history":histories,

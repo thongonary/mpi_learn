@@ -52,13 +52,17 @@ def load_model(filename=None, json_str=None, weights_file=None, custom_objects={
         json_str: (or) a json string specifying the model architecture
         weights_file: path to HDF5 file containing model weights
 	custom_objects: A Dictionary of custom classes used in the model keyed by name"""
-    import_keras()
-    from keras.models import model_from_json
-    if filename != None:
-        with open( filename ) as arch_f:
-            json_str = arch_f.readline()
-    model = model_from_json( json_str, custom_objects=custom_objects) 
-    if weights_file is not None:
-        model.load_weights( weights_file )
+    if "torch" in filename:
+        import torch
+        model = torch.load(filename)
+    else:
+        import_keras()
+        from keras.models import model_from_json
+        if filename != None:
+            with open( filename ) as arch_f:
+                json_str = arch_f.readline()
+        model = model_from_json( json_str, custom_objects=custom_objects) 
+        if weights_file is not None:
+            model.load_weights( weights_file )
     return model
 

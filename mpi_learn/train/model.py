@@ -3,6 +3,7 @@
 from mpi_learn.utils import load_model, get_device_name
 import numpy as np
 import copy
+#import torch
 
 class MPICallbacks(object):
     def __init__(self, cbks):
@@ -201,6 +202,7 @@ class MPIModel(object):
 
     def compile(self, **args):
         if self.model:
+            print("Model compilation argument {}".format(args))
             self.model.compile( **args )
         else:
             for m in self.models:
@@ -210,7 +212,10 @@ class MPIModel(object):
 
     def train_on_batch(self, **args):
         if self.model:
-            return np.asarray(self.model.train_on_batch( **args ))
+            x = self.model.train_on_batch(**args)
+            #print("train_on_batch returns {}".format(np.asarray(x)))
+            return(np.asarray(x))
+            #return np.asarray(self.model.train_on_batch( **args ))
         else:
             h = []
             for m in self.models:
@@ -267,6 +272,23 @@ class ModelBuilder(object):
     def build_model(self):
         """Should return an uncompiled Keras model."""
         raise NotImplementedError
+
+class ModelPytorch(ModelBuilder):
+    def __init__(self, comm, filename=None, model_class_path=None):
+        print("Initializing Pytorch model")
+        super().__init__(comm)
+        self.filename = filename
+        self.model_class_path = model_class_path.rsplit('.',1)
+
+    def build_model(self):
+#        to_import =  'from {} import {}'.format(self.model_class_path[0], self.model_class_path[1])
+#        print(to_import)
+#        try:
+#            exec(to_import)
+#        except:
+#            print("Path {} is invalid".format(self.model_class_path))
+#            raise
+        return MPIModel(load_model(self.filename))
 
 class ModelFromJson(ModelBuilder):
     """ModelBuilder class that builds from model architecture specified
