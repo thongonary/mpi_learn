@@ -87,11 +87,15 @@ class Net(nn.Module):
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
 
-class KerasWrapperForPytorchCPU(Net):
-    def __init__(self):
+class KerasWrapperForPytorch(Net):
+    def __init__(self, gpus=0):
         super().__init__()
+        self.gpus = gpus
         self.add_keras_variables()
-
+        if gpus == 1:
+            print("Sending model to cuda")
+            self = nn.DataParallel(self.cuda())
+    
     def add_keras_variables(self):
         self.loss = None
         self.optimizer = None
@@ -101,6 +105,8 @@ class KerasWrapperForPytorchCPU(Net):
         self.callbacks = []
 
     def get_weights(self):
+        if self.gpus > 0:
+            return [i.data.cpu().numpy() for i in list(self.parameters())]
         return [i.data.numpy() for i in list(self.parameters())]
    
     def set_weights(self, weights=[]):
@@ -109,7 +115,7 @@ class KerasWrapperForPytorchCPU(Net):
             list(self.parameters())[i].data.copy_(torch.from_numpy(weight))
         return
 
-    def compile(self, **kwargs)
+    def compile(self, **kwargs):
         self.loss = nn.NLLLoss()
         for metric in kwargs['metrics']:
             if metric.lower() == 'acc' or metric.lower() == 'accuracy':
@@ -143,14 +149,19 @@ class KerasWrapperForPytorchCPU(Net):
         '''
         self.train()
         self.optimizer.zero_grad()
-        pred = self.forward(Variable(x))
         target = y.long().max(1)[1] # Pytorch doesn't need 1-hot encoded label. Only the indices of classes.
+        if self.gpus>0: 
+            x = x.cuda()
+            target = target.cuda()
+        x = Variable(x)
+        pred = self.forward(x)
         loss = self.loss(pred, Variable(target)) 
         loss.backward()
         self.optimizer.step()
-        self.metrics = [loss.data.numpy()[0]]
+        self.metrics = [loss.data.numpy()[0]] if self.gpus == 0 else [loss.data.cpu().numpy()[0]]
         if 'acc' in self.metrics_names: # compute the accuracy
             acc = self._accuracy(pred.data, target, topk=(1,))[0]
+            if self.gpus > 0: acc = acc.cpu()
             self.metrics.append(acc.numpy()[0])
         return self.metrics
 
@@ -164,22 +175,21 @@ class KerasWrapperForPytorchCPU(Net):
         A list of scalar training loss and a metric specified in the compile method.
         '''
         self.eval()
-        pred = self.forward(Variable(x, volatile=True))
         target = y.long().max(1)[1] # Pytorch doesn't need 1-hot encoded label. Only the indices of classes.
+        if self.gpus > 0:
+            x = x.cuda()
+            target = target.cuda()
+        pred = self.forward(Variable(x, volatile=True))
         loss = self.loss(pred, Variable(target, volatile=True)) 
-        self.metrics = [loss.data.numpy()[0]]
+        self.metrics = [loss.data.numpy()[0]] if self.gpus == 0 else [loss.data.cpu().numpy()[0]]
         if 'acc' in self.metrics_names: # compute the accuracy
             acc = self._accuracy(pred.data, target, topk=(1,))[0]
+            if self.gpus > 0: acc = acc.cpu()
             self.metrics.append(acc.numpy()[0])
         return self.metrics
 
-class DataParallelKerasInterface(nn.DataParallel):
-    # To be implemented
-    def __init__(self):
-        super().__init__()
-
 def make_mnist_pytorch_model():
-    model = KerasWrapperForPytorchCPU()
+    model = KerasWrapperForPytorch(gpus=1)
     #import torch
     #if torch.cuda.is_available():  # To be implemented
     #    model = torch.nn.DataParallel(model).cuda()
